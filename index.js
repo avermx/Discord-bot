@@ -17,18 +17,6 @@ const {
   StringSelectMenuBuilder,
 } = require("discord.js");
 require("dotenv").config();
-const mongoose = require("mongoose");
-
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('✅ Connected to MongoDB'))
-  .catch(err => console.error('❌ MongoDB connection error:', err));
-
-const muteSchema = new mongoose.Schema({
-  userId: { type: String, required: true, unique: true },
-  used: { type: Number, default: 0 },
-  resetAt: { type: Number, default: 0 }
-});
-const MuteData = mongoose.model("MuteData", muteSchema);
 
 /* ================= CONFIG ================= */
 // ⚠️ APNA TOKEN YAHAN PASTE KAREIN
@@ -54,6 +42,7 @@ const userWarnings = new Map(); // Format: userId -> [{reason, date, warnedBy, i
 let warnIdCounter = 1;
 
 /* ===== MUTE TRACKING SYSTEM ===== */
+const userMuteData = new Map(); // Format: userId -> { used: number, resetAt: number }
 const mutedByTracker = new Map(); // Format: userId -> {mutedBy: modId, timestamp: Date.now()}
 
 /* ===== DEBOUNCE MAP ===== */
@@ -186,7 +175,7 @@ const slashCommands = [
 ].map((c) => c.toJSON());
 
 /* ================= READY ================= */
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -524,8 +513,7 @@ client.on("messageCreate", async (message) => {
       if (hasBypassRole(t)) return message.reply("❌ Cannot mute - User has bypass role");
 
       const now = Date.now();
-      let data = await MuteData.findOne({ userId: message.author.id });
-      if (!data) data = new MuteData({ userId: message.author.id, used: 0, resetAt: now + MUTE_RESET_TIME });
+      let data = userMuteData.get(message.author.id) || { used: 0, resetAt: now + MUTE_RESET_TIME };
 
       if (now >= data.resetAt) {
         data.used = 0;
@@ -536,7 +524,7 @@ client.on("messageCreate", async (message) => {
 
       await t.voice.setMute(true);
       data.used++;
-      await data.save();
+      userMuteData.set(message.author.id, data);
 
       // Track who muted this user
       mutedByTracker.set(t.id, {
@@ -1273,8 +1261,7 @@ client.on("interactionCreate", async (i) => {
       if (hasBypassRole(user)) return safeReply(i, "❌ Cannot mute - User has bypass role", true);
 
       const now = Date.now();
-      let data = await MuteData.findOne({ userId: i.user.id });
-      if (!data) data = new MuteData({ userId: i.user.id, used: 0, resetAt: now + MUTE_RESET_TIME });
+      let data = userMuteData.get(i.user.id) || { used: 0, resetAt: now + MUTE_RESET_TIME };
 
       if (now >= data.resetAt) {
         data.used = 0;
@@ -1285,7 +1272,7 @@ client.on("interactionCreate", async (i) => {
 
       await user.voice.setMute(true);
       data.used++;
-      await data.save();
+      userMuteData.set(i.user.id, data);
 
       // Track who muted this user
       mutedByTracker.set(user.id, {
